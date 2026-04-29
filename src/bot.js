@@ -209,11 +209,10 @@ client.on("interactionCreate", async (interaction) => {
     commandName === "setchannel" || commandName === "setterm";
   if (
     isConfigCommand &&
-    config.adminUserIds.length > 0 &&
-    !config.adminUserIds.includes(interaction.user.id)
+    !interaction.member.permissions.has(PermissionsBitField.Flags.ManageGuild)
   ) {
     return interaction.reply({
-      content: "❌ You are not authorized to use this command.",
+      content: "❌ You need Manage Guild permissions to use this command.",
       flags: MessageFlags.Ephemeral,
     });
   }
