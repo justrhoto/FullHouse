@@ -1,4 +1,4 @@
-FROM node:18-alpine
+FROM node:22-alpine
 
 WORKDIR /app
 
@@ -11,4 +11,4 @@ ENV DATA_DIR=/data
 
 VOLUME ["/data"]
 
-CMD ["node", "bot.js"]
+CMD ["node", "src/bot.js"]
