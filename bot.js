@@ -83,7 +83,7 @@ async function handleVoiceUpdate(oldState, newState) {
 
     const embed = new EmbedBuilder()
       .setColor(0xffa500)
-      .setTitle(`🔔 Almost a ${term}!`)
+      .setTitle(`🔔 Almost at ${term}!`)
       .setDescription(
         `**${voiceCount}/${totalCount}** members are in voice — just one more needed!\n\n` +
           `Missing: ${missingList || "Unknown"}\n\n` +
@@ -133,7 +133,7 @@ async function handleVoiceUpdate(oldState, newState) {
       .setColor(0xff6b6b)
       .setTitle(`😢 ${term} Ended`)
       .setDescription(
-        `Someone left the ${term} session.\n\n` +
+        `Someone left - the voice channel is no longer ${term}.\n\n` +
           `**Session duration:** ${durationStr}\n` +
           `*This session has been recorded.*`,
       )
