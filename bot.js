@@ -59,6 +59,7 @@ async function handleVoiceUpdate(oldState, newState) {
   if (!alertChannel || totalCount < 2) return;
 
   const data = loadData();
+  const term = data.guilds?.[guild.id]?.term || 'Full House';
   const oneShyOfFull = voiceCount === totalCount - 1;
   const fullHouse = voiceCount === totalCount;
 
@@ -74,7 +75,7 @@ async function handleVoiceUpdate(oldState, newState) {
 
     const embed = new EmbedBuilder()
       .setColor(0xFFA500)
-      .setTitle('🔔 Almost a Full House!')
+      .setTitle(`🔔 Almost a ${term}!`)
       .setDescription(
         `**${voiceCount}/${totalCount}** members are in voice — just one more needed!\n\n` +
         `Missing: ${missingList || 'Unknown'}\n\n` +
@@ -92,11 +93,11 @@ async function handleVoiceUpdate(oldState, newState) {
 
     const embed = new EmbedBuilder()
       .setColor(0x00FF88)
-      .setTitle('🎊 FULL HOUSE! 🎊')
+      .setTitle(`🎊 ${term.toUpperCase()}! 🎊`)
       .setDescription(
         `**Everyone is here!** All **${totalCount}** members have joined voice!\n\n` +
         `Let the good times roll! 🥳🎉🎈\n\n` +
-        `*Recording your full-house session...*`
+        `*Recording your ${term} session...*`
       )
       .setTimestamp()
       .setFooter({ text: 'Full House Bot' });
@@ -122,9 +123,9 @@ async function handleVoiceUpdate(oldState, newState) {
 
     const embed = new EmbedBuilder()
       .setColor(0xFF6B6B)
-      .setTitle('😢 Full House Ended')
+      .setTitle(`😢 ${term} Ended`)
       .setDescription(
-        `Someone left the full house session.\n\n` +
+        `Someone left the ${term} session.\n\n` +
         `**Session duration:** ${durationStr}\n` +
         `*This session has been recorded.*`
       )
@@ -176,6 +177,15 @@ const commands = [
         .setMinValue(1)
         .setMaxValue(10)
     ),
+  new SlashCommandBuilder()
+    .setName('setterm')
+    .setDescription('Set the name your group uses for everyone being in VC')
+    .addStringOption(opt =>
+      opt.setName('term')
+        .setDescription('e.g. "Full Prestige", "Full House"')
+        .setRequired(true)
+    )
+    .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageGuild),
 ].map(cmd => cmd.toJSON());
 
 client.on('interactionCreate', async (interaction) => {
@@ -192,6 +202,15 @@ client.on('interactionCreate', async (interaction) => {
     return interaction.reply({ content: `✅ Alert channel set to ${channel}!`, ephemeral: true });
   }
 
+  if (commandName === 'setterm') {
+    const term = interaction.options.getString('term');
+    const data = loadData();
+    if (!data.guilds[guild.id]) data.guilds[guild.id] = {};
+    data.guilds[guild.id].term = term;
+    saveData(data);
+    return interaction.reply({ content: `✅ Term set to **${term}**!`, ephemeral: true });
+  }
+
   if (commandName === 'status') {
     await interaction.deferReply();
     await guild.members.fetch();
@@ -200,13 +219,14 @@ client.on('interactionCreate', async (interaction) => {
     const totalCount = getTotalMemberCount(guild);
     const data = loadData();
     const guildConfig = data.guilds?.[guild.id];
+    const term = guildConfig?.term || 'Full House';
     const alertCh = guildConfig?.alertChannelId ? `<#${guildConfig.alertChannelId}>` : '*Not set*';
 
     const state = getState(guild.id);
     let sessionInfo = null;
     if (state.fullHouseStart) {
       const running = formatDuration(Date.now() - state.fullHouseStart.getTime());
-      sessionInfo = `**🟢 Full house active for:** ${running}`;
+      sessionInfo = `**🟢 ${term} active for:** ${running}`;
     }
 
     const embed = new EmbedBuilder()
@@ -216,6 +236,7 @@ client.on('interactionCreate', async (interaction) => {
         { name: 'Voice Members', value: `${voiceCount}/${totalCount}`, inline: true },
         { name: 'Alert Channel', value: alertCh, inline: true },
         { name: 'Sessions Recorded', value: `${(guildConfig?.history || []).length}`, inline: true },
+        { name: 'Term', value: term, inline: true },
       )
       .setDescription(sessionInfo)
       .setTimestamp();
@@ -225,9 +246,11 @@ client.on('interactionCreate', async (interaction) => {
 
   if (commandName === 'history') {
     const data = loadData();
-    const history = data.guilds?.[guild.id]?.history || [];
+    const guildConfig = data.guilds?.[guild.id];
+    const term = guildConfig?.term || 'Full House';
+    const history = guildConfig?.history || [];
     if (history.length === 0) {
-      return interaction.reply({ content: '📭 No full house sessions recorded yet!', ephemeral: true });
+      return interaction.reply({ content: `📭 No ${term} sessions recorded yet!`, ephemeral: true });
     }
 
     const limit = interaction.options.getInteger('limit') ?? 5;
@@ -240,7 +263,7 @@ client.on('interactionCreate', async (interaction) => {
 
     const embed = new EmbedBuilder()
       .setColor(0x9B59B6)
-      .setTitle('📜 Full House History')
+      .setTitle(`📜 ${term} History`)
       .setDescription(lines.join('\n'))
       .addFields(
         { name: 'Total Sessions', value: `${history.length}`, inline: true },
