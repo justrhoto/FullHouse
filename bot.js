@@ -1,6 +1,7 @@
-const { Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
+const {
+  Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField,
+  REST, Routes, SlashCommandBuilder, ChannelType,
+} = require('discord.js');
 const config = require('./config.js');
 const { loadData, saveData } = require('./storage.js');
 
@@ -9,13 +10,9 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
   ],
 });
 
-// Track state per guild
-// { guildId: { alertSent: bool, fullHouseStart: Date|null } }
 const guildState = {};
 
 function getState(guildId) {
@@ -25,7 +22,6 @@ function getState(guildId) {
   return guildState[guildId];
 }
 
-// Count non-bot members currently in ANY voice channel in the guild
 function getVoiceMemberCount(guild) {
   let count = 0;
   for (const [, channel] of guild.channels.cache) {
@@ -38,7 +34,6 @@ function getVoiceMemberCount(guild) {
   return count;
 }
 
-// Count total non-bot members in the guild
 function getTotalMemberCount(guild) {
   return guild.members.cache.filter(m => !m.user.bot).size;
 }
@@ -54,7 +49,6 @@ async function handleVoiceUpdate(oldState, newState) {
   const guild = newState.guild || oldState.guild;
   if (!guild) return;
 
-  // Ensure member cache is populated
   await guild.members.fetch();
 
   const voiceCount = getVoiceMemberCount(guild);
@@ -62,25 +56,18 @@ async function handleVoiceUpdate(oldState, newState) {
   const state = getState(guild.id);
   const alertChannel = await getAlertChannel(guild);
 
-  if (!alertChannel) return;
+  if (!alertChannel || totalCount < 2) return;
 
   const data = loadData();
-  const guildConfig = data.guilds?.[guild.id];
-
-  // Need at least 2 members for this to be meaningful
-  if (totalCount < 2) return;
-
   const oneShyOfFull = voiceCount === totalCount - 1;
   const fullHouse = voiceCount === totalCount;
 
-  // --- Transition: Almost full (one shy) ---
   if (oneShyOfFull && !state.alertSent) {
     state.alertSent = true;
     state.fullHouseStart = null;
 
     const missingMembers = guild.members.cache.filter(m => {
       if (m.user.bot) return false;
-      // Check if they're NOT in any voice channel
       return !guild.channels.cache.some(ch => ch.isVoiceBased() && ch.members.has(m.id));
     });
     const missingList = missingMembers.map(m => `<@${m.id}>`).join(', ');
@@ -99,7 +86,6 @@ async function handleVoiceUpdate(oldState, newState) {
     await alertChannel.send({ embeds: [embed] });
   }
 
-  // --- Transition: Full house! ---
   if (fullHouse && !state.fullHouseStart) {
     state.alertSent = false;
     state.fullHouseStart = new Date();
@@ -118,13 +104,11 @@ async function handleVoiceUpdate(oldState, newState) {
     await alertChannel.send({ embeds: [embed] });
   }
 
-  // --- Transition: Was full, now someone left ---
   if (!fullHouse && state.fullHouseStart) {
     const duration = Date.now() - state.fullHouseStart.getTime();
     const durationStr = formatDuration(duration);
     state.fullHouseStart = null;
 
-    // Save to history
     const record = {
       timestamp: new Date().toISOString(),
       durationMs: duration,
@@ -150,7 +134,6 @@ async function handleVoiceUpdate(oldState, newState) {
     await alertChannel.send({ embeds: [embed] });
   }
 
-  // Reset alertSent if voice count drops below threshold
   if (voiceCount < totalCount - 1) {
     state.alertSent = false;
   }
@@ -168,48 +151,62 @@ function formatDuration(ms) {
   return `${seconds}s`;
 }
 
-// ---- Commands ----
-client.on('messageCreate', async (message) => {
-  if (message.author.bot) return;
-  const prefix = config.prefix || '!fh';
-  if (!message.content.startsWith(prefix)) return;
+// ---- Slash Commands ----
 
-  const args = message.content.slice(prefix.length).trim().split(/\s+/);
-  const command = args.shift().toLowerCase();
+const commands = [
+  new SlashCommandBuilder()
+    .setName('setchannel')
+    .setDescription('Set the channel for Full House alerts')
+    .addChannelOption(opt =>
+      opt.setName('channel')
+        .setDescription('Text channel to send alerts to')
+        .addChannelTypes(ChannelType.GuildText)
+        .setRequired(true)
+    )
+    .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageGuild),
+  new SlashCommandBuilder()
+    .setName('status')
+    .setDescription('Show current voice status and bot config'),
+  new SlashCommandBuilder()
+    .setName('history')
+    .setDescription('Show recent full house sessions')
+    .addIntegerOption(opt =>
+      opt.setName('limit')
+        .setDescription('Number of sessions to show (default 5, max 10)')
+        .setMinValue(1)
+        .setMaxValue(10)
+    ),
+].map(cmd => cmd.toJSON());
 
-  const data = loadData();
-  if (!data.guilds) data.guilds = {};
-  if (!data.guilds[message.guild.id]) data.guilds[message.guild.id] = {};
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
 
-  // !fh setchannel #channel
-  if (command === 'setchannel') {
-    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageGuild)) {
-      return message.reply('❌ You need **Manage Server** permission to do that.');
-    }
-    const channel = message.mentions.channels.first();
-    if (!channel || !channel.isTextBased()) {
-      return message.reply('❌ Please mention a valid text channel. Usage: `!fh setchannel #channel`');
-    }
-    data.guilds[message.guild.id].alertChannelId = channel.id;
+  const { commandName, guild } = interaction;
+
+  if (commandName === 'setchannel') {
+    const channel = interaction.options.getChannel('channel');
+    const data = loadData();
+    if (!data.guilds[guild.id]) data.guilds[guild.id] = {};
+    data.guilds[guild.id].alertChannelId = channel.id;
     saveData(data);
-    return message.reply(`✅ Alert channel set to ${channel}!`);
+    return interaction.reply({ content: `✅ Alert channel set to ${channel}!`, ephemeral: true });
   }
 
-  // !fh status
-  if (command === 'status') {
-    await message.guild.members.fetch();
-    const voiceCount = getVoiceMemberCount(message.guild);
-    const totalCount = getTotalMemberCount(message.guild);
-    const guildConfig = data.guilds[message.guild.id];
-    const alertCh = guildConfig?.alertChannelId
-      ? `<#${guildConfig.alertChannelId}>`
-      : '*Not set*';
+  if (commandName === 'status') {
+    await interaction.deferReply();
+    await guild.members.fetch();
 
-    const state = getState(message.guild.id);
-    let sessionInfo = '';
+    const voiceCount = getVoiceMemberCount(guild);
+    const totalCount = getTotalMemberCount(guild);
+    const data = loadData();
+    const guildConfig = data.guilds?.[guild.id];
+    const alertCh = guildConfig?.alertChannelId ? `<#${guildConfig.alertChannelId}>` : '*Not set*';
+
+    const state = getState(guild.id);
+    let sessionInfo = null;
     if (state.fullHouseStart) {
       const running = formatDuration(Date.now() - state.fullHouseStart.getTime());
-      sessionInfo = `\n**🟢 Full house active for:** ${running}`;
+      sessionInfo = `**🟢 Full house active for:** ${running}`;
     }
 
     const embed = new EmbedBuilder()
@@ -220,29 +217,25 @@ client.on('messageCreate', async (message) => {
         { name: 'Alert Channel', value: alertCh, inline: true },
         { name: 'Sessions Recorded', value: `${(guildConfig?.history || []).length}`, inline: true },
       )
-      .setDescription(sessionInfo || null)
+      .setDescription(sessionInfo)
       .setTimestamp();
 
-    return message.reply({ embeds: [embed] });
+    return interaction.editReply({ embeds: [embed] });
   }
 
-  // !fh history [limit]
-  if (command === 'history') {
-    const guildConfig = data.guilds[message.guild.id];
-    const history = guildConfig?.history || [];
+  if (commandName === 'history') {
+    const data = loadData();
+    const history = data.guilds?.[guild.id]?.history || [];
     if (history.length === 0) {
-      return message.reply('📭 No full house sessions recorded yet!');
+      return interaction.reply({ content: '📭 No full house sessions recorded yet!', ephemeral: true });
     }
 
-    const limit = Math.min(parseInt(args[0]) || 5, 10);
+    const limit = interaction.options.getInteger('limit') ?? 5;
     const recent = history.slice(-limit).reverse();
-
     const lines = recent.map((r, i) => {
       const date = new Date(r.timestamp).toLocaleDateString();
       return `**${i + 1}.** ${date} — ${r.durationFormatted} (${r.memberCount} members)`;
     });
-
-    // Calculate total time
     const totalMs = history.reduce((sum, r) => sum + r.durationMs, 0);
 
     const embed = new EmbedBuilder()
@@ -256,31 +249,18 @@ client.on('messageCreate', async (message) => {
       .setFooter({ text: `Showing last ${recent.length} sessions` })
       .setTimestamp();
 
-    return message.reply({ embeds: [embed] });
-  }
-
-  // !fh help
-  if (command === 'help' || command === '') {
-    const embed = new EmbedBuilder()
-      .setColor(0x5865F2)
-      .setTitle('🏠 Full House Bot — Help')
-      .setDescription('Monitors voice channels and celebrates when the whole server is together!')
-      .addFields(
-        { name: '`!fh setchannel #channel`', value: 'Set the alert/celebration channel *(requires Manage Server)*' },
-        { name: '`!fh status`', value: 'Show current voice status and config' },
-        { name: '`!fh history [n]`', value: 'Show last N full-house sessions (default: 5, max: 10)' },
-        { name: '`!fh help`', value: 'Show this help message' },
-      )
-      .setFooter({ text: 'Full House Bot' });
-
-    return message.reply({ embeds: [embed] });
+    return interaction.reply({ embeds: [embed] });
   }
 });
 
 client.on('voiceStateUpdate', handleVoiceUpdate);
 
-client.once('ready', () => {
+client.once('ready', async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
+
+  const rest = new REST().setToken(config.token);
+  await rest.put(Routes.applicationCommands(client.application.id), { body: commands });
+  console.log('✅ Slash commands registered globally');
   console.log(`📡 Watching ${client.guilds.cache.size} server(s)`);
 });
 
