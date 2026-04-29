@@ -7,6 +7,7 @@ const {
   Routes,
   SlashCommandBuilder,
   ChannelType,
+  MessageFlags,
 } = require("discord.js");
 const config = require("./config.js");
 const { loadData, saveData } = require("./storage.js");
@@ -213,7 +214,7 @@ client.on("interactionCreate", async (interaction) => {
   ) {
     return interaction.reply({
       content: "❌ You are not authorized to use this command.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -225,7 +226,7 @@ client.on("interactionCreate", async (interaction) => {
     saveData(data);
     return interaction.reply({
       content: `✅ Alert channel set to ${channel}!`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -237,7 +238,7 @@ client.on("interactionCreate", async (interaction) => {
     saveData(data);
     return interaction.reply({
       content: `✅ Term set to **${term}**!`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -294,7 +295,7 @@ client.on("interactionCreate", async (interaction) => {
     if (history.length === 0) {
       return interaction.reply({
         content: `📭 No ${term} sessions recorded yet!`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -327,7 +328,7 @@ client.on("interactionCreate", async (interaction) => {
 
 client.on("voiceStateUpdate", handleVoiceUpdate);
 
-client.once("ready", async () => {
+client.once("clientReady", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
   const rest = new REST().setToken(config.token);
