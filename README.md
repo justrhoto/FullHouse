@@ -4,6 +4,10 @@ A Discord bot that monitors voice channel membership, alerts when the server is 
 
 The term "Full House" is configurable per server — call it whatever your group uses.
 
+**[Click here to invite the bot to your server](https://discord.com/oauth2/authorize?client_id=1498857481018020001)** — no self-hosting required.
+
+Like the bot? [**Send me a tip on Ko-Fi!**](https://ko-fi.com/otisrhotis)
+
 ---
 
 ## Features
@@ -48,9 +52,6 @@ cp .env.example .env
 
 ```env
 DISCORD_TOKEN=your_bot_token_here
-
-# Optional: restrict config commands to specific Discord user IDs
-# ADMIN_USER_IDS=123456789012345678,987654321098765432
 ```
 
 ### 4. Run
@@ -71,20 +72,12 @@ In Discord, run `/setchannel #your-channel` to tell the bot where to post alerts
 
 ## Commands
 
-| Command | Description | Permission |
-|---|---|---|
-| `/setchannel #channel` | Set the alert & celebration channel | Manage Server (+ admin ID if configured) |
-| `/setterm <term>` | Set your group's name for the event | Manage Server (+ admin ID if configured) |
-| `/status` | Show current voice count and bot config | Everyone |
-| `/history [limit]` | Show last N sessions (default 5, max 10) | Everyone |
-
----
-
-## Admin User IDs
-
-If `ADMIN_USER_IDS` is set, only those users can run `/setchannel` and `/setterm`, regardless of their server permissions. `/status` and `/history` remain open to everyone.
-
-To find a user ID: enable **Developer Mode** in Discord settings → right-click any user → **Copy User ID**.
+| Command                | Description                              | Permission    |
+| ---------------------- | ---------------------------------------- | ------------- |
+| `/setchannel #channel` | Set the alert & celebration channel      | Manage Server |
+| `/setterm <term>`      | Set your group's name for the event      | Manage Server |
+| `/status`              | Show current voice count and bot config  | Everyone      |
+| `/history [limit]`     | Show last N sessions (default 5, max 10) | Everyone      |
 
 ---
 
@@ -137,16 +130,6 @@ docker run -d \
 ```
 
 The `/data` volume persists `data.json` across container restarts and rebuilds.
-
-To pass admin IDs:
-
-```bash
-docker run -d \
-  -e DISCORD_TOKEN=your_token_here \
-  -e ADMIN_USER_IDS=123456789012345678 \
-  -v fullhouse-data:/data \
-  fullhouse-bot
-```
 
 ---
 
