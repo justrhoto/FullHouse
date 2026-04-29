@@ -204,6 +204,15 @@ client.on("interactionCreate", async (interaction) => {
 
   const { commandName, guild } = interaction;
 
+  const isConfigCommand = commandName === "setchannel" || commandName === "setterm";
+  if (
+    isConfigCommand &&
+    config.adminUserIds.length > 0 &&
+    !config.adminUserIds.includes(interaction.user.id)
+  ) {
+    return interaction.reply({ content: '❌ You are not authorized to use this command.', ephemeral: true });
+  }
+
   if (commandName === "setchannel") {
     const channel = interaction.options.getChannel("channel");
     const data = loadData();
