@@ -1,16 +1,20 @@
-# 🏠 Full House Bot
+# Full House Bot
 
 A Discord bot that monitors voice channel membership, alerts when the server is one member shy of full, celebrates when everyone's in, and records how long you spend together.
+
+The term "Full House" is configurable per server — call it whatever your group uses.
 
 ---
 
 ## Features
 
-- 🔔 **Almost-Full Alert** — Posts a message (and pings the missing member) when voice count = total members − 1
-- 🎊 **Full House Celebration** — Fires a celebration message the moment everyone is in voice
-- ⏱️ **Session Tracking** — Records start time and duration of every full-house session
-- 📜 **History Command** — View past sessions and cumulative time spent together
-- ⚙️ **Per-Server Config** — Each server picks its own alert channel
+- **Almost-Full Alert** — Pings the missing member(s) when voice count = total members − 1
+- **Full Celebration** — Fires a celebration embed the moment everyone joins
+- **Session Tracking** — Records the start time and duration of every full session
+- **History Command** — View past sessions and cumulative time spent together
+- **Configurable Term** — Each server sets its own name for the event (e.g. "Full Prestige")
+- **Per-Server Config** — Alert channel and term stored independently per guild
+- **Docker Support** — Includes a Dockerfile with a persistent data volume
 
 ---
 
@@ -21,8 +25,7 @@ A Discord bot that monitors voice channel membership, alerts when the server is 
 1. Go to https://discord.com/developers/applications and click **New Application**.
 2. Go to the **Bot** tab → **Add Bot**.
 3. Under **Privileged Gateway Intents**, enable:
-   - ✅ **Server Members Intent**
-   - ✅ **Message Content Intent**
+   - **Server Members Intent**
 4. Copy your **Bot Token**.
 
 ### 2. Invite the Bot to Your Server
@@ -30,67 +33,81 @@ A Discord bot that monitors voice channel membership, alerts when the server is 
 Use this URL (replace `YOUR_CLIENT_ID`):
 
 ```
-https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=274878024704&scope=bot
+https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=84992&scope=bot%20applications.commands
 ```
 
 Required permissions: **View Channels**, **Send Messages**, **Embed Links**, **Read Message History**
 
-### 3. Install & Configure
+### 3. Configure
+
+Copy `.env.example` to `.env` and fill in your values:
 
 ```bash
-# Clone or download this folder, then:
-npm install
-
-# Set your token in config.js, or use an environment variable:
-export DISCORD_TOKEN=your_token_here
+cp .env.example .env
 ```
 
-Edit `config.js` to set your token and optionally change the command prefix (default: `!fh`).
+```env
+DISCORD_TOKEN=your_bot_token_here
 
-### 4. Run the Bot
+# Optional: restrict config commands to specific Discord user IDs
+# ADMIN_USER_IDS=123456789012345678,987654321098765432
+```
+
+### 4. Run
 
 ```bash
+npm install
 npm start
-# or for auto-restart on file changes:
+
+# or with auto-restart on file changes:
 npm run dev
 ```
+
+### 5. Set the Alert Channel
+
+In Discord, run `/setchannel #your-channel` to tell the bot where to post alerts.
 
 ---
 
 ## Commands
 
-All commands start with `!fh` (configurable in `config.js`).
-
 | Command | Description | Permission |
 |---|---|---|
-| `!fh setchannel #channel` | Set the alert & celebration channel | Manage Server |
-| `!fh status` | Show current voice count and bot config | Everyone |
-| `!fh history [n]` | Show last N full-house sessions (default 5) | Everyone |
-| `!fh help` | Show the help embed | Everyone |
+| `/setchannel #channel` | Set the alert & celebration channel | Manage Server (+ admin ID if configured) |
+| `/setterm <term>` | Set your group's name for the event | Manage Server (+ admin ID if configured) |
+| `/status` | Show current voice count and bot config | Everyone |
+| `/history [limit]` | Show last N sessions (default 5, max 10) | Everyone |
+
+---
+
+## Admin User IDs
+
+If `ADMIN_USER_IDS` is set, only those users can run `/setchannel` and `/setterm`, regardless of their server permissions. `/status` and `/history` remain open to everyone.
+
+To find a user ID: enable **Developer Mode** in Discord settings → right-click any user → **Copy User ID**.
 
 ---
 
 ## How It Works
 
-1. **Bot watches all `voiceStateUpdate` events** (joins, leaves, moves).
-2. It counts **non-bot members** currently in any voice channel vs. total non-bot server members.
-3. **One shy:** `voiceCount === totalMembers - 1` → fires the alert embed (once per drop-in cycle).
-4. **Full house:** `voiceCount === totalMembers` → fires the celebration embed and starts a timer.
-5. **Someone leaves:** stops the timer, calculates duration, saves to `data.json`, posts a session-end embed.
-
-Session data is stored locally in `data.json` (auto-created, excluded from git).
+1. The bot watches all `voiceStateUpdate` events (joins, leaves, moves).
+2. It counts **non-bot members** in any voice channel vs. total non-bot server members.
+3. **One shy:** `voiceCount === totalMembers - 1` → posts the alert embed and pings the missing member.
+4. **Full:** `voiceCount === totalMembers` → posts the celebration embed and starts a timer.
+5. **Someone leaves:** stops the timer, saves the session to `data.json`, posts a session-end embed.
 
 ---
 
 ## Data Storage
 
-Sessions are saved in `data.json`:
+Sessions are saved in `data.json` (auto-created, gitignored):
 
 ```json
 {
   "guilds": {
     "123456789": {
       "alertChannelId": "987654321",
+      "term": "Full Prestige",
       "history": [
         {
           "timestamp": "2024-11-10T21:30:00.000Z",
@@ -106,24 +123,41 @@ Sessions are saved in `data.json`:
 
 ---
 
-## Deploying 24/7
+## Docker
 
-For always-on hosting, consider:
+```bash
+# Build
+docker build -t fullhouse-bot .
 
-- **[Railway](https://railway.app)** — Free tier, easy deploy from GitHub
-- **[Fly.io](https://fly.io)** — Free tier, Docker-based
-- **VPS** (DigitalOcean, Linode, etc.) with `pm2`:
-  ```bash
-  npm install -g pm2
-  pm2 start bot.js --name fullhouse-bot
-  pm2 save && pm2 startup
-  ```
+# Run with a named volume for persistence
+docker run -d \
+  -e DISCORD_TOKEN=your_token_here \
+  -v fullhouse-data:/data \
+  fullhouse-bot
+```
+
+The `/data` volume persists `data.json` across container restarts and rebuilds.
+
+To pass admin IDs:
+
+```bash
+docker run -d \
+  -e DISCORD_TOKEN=your_token_here \
+  -e ADMIN_USER_IDS=123456789012345678 \
+  -v fullhouse-data:/data \
+  fullhouse-bot
+```
 
 ---
 
-## Customization Ideas
+## Deploying 24/7
 
-- **Ping the missing member** in the alert embed (already included — `<@userId>` mention)
-- **Role-based membership** — filter by a specific role instead of all members
-- **Scheduled summaries** — weekly digest of full-house time using `node-cron`
-- **Leaderboard** — track which member is most often the last to join
+- **Docker** (above) on any VPS
+- **[Railway](https://railway.app)** — easy deploy from GitHub, set env vars in the dashboard
+- **[Fly.io](https://fly.io)** — Docker-native, persistent volumes available
+- **VPS with pm2:**
+  ```bash
+  npm install -g pm2
+  pm2 start src/bot.js --name fullhouse-bot
+  pm2 save && pm2 startup
+  ```

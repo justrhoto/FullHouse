@@ -11,4 +11,4 @@ ENV DATA_DIR=/data
 
 VOLUME ["/data"]
 
-CMD ["node", "bot.js"]
+CMD ["node", "src/bot.js"]
