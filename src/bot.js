@@ -56,8 +56,6 @@ async function handleVoiceUpdate(oldState, newState) {
   const guild = newState.guild || oldState.guild;
   if (!guild) return;
 
-  await guild.members.fetch();
-
   const voiceCount = getVoiceMemberCount(guild);
   const totalCount = getTotalMemberCount(guild);
   const state = getState(guild.id);
@@ -243,7 +241,7 @@ client.on("interactionCreate", async (interaction) => {
 
   if (commandName === "status") {
     await interaction.deferReply();
-    await guild.members.fetch();
+    await guild.members.fetch().catch(() => {});
 
     const voiceCount = getVoiceMemberCount(guild);
     const totalCount = getTotalMemberCount(guild);
@@ -336,6 +334,10 @@ client.once("clientReady", async () => {
   });
   console.log("✅ Slash commands registered globally");
   console.log(`📡 Watching ${client.guilds.cache.size} server(s)`);
+});
+
+client.on("error", (err) => {
+  console.error("Discord client error:", err.message);
 });
 
 client.login(config.token);
