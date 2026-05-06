@@ -328,6 +328,12 @@ client.on("voiceStateUpdate", handleVoiceUpdate);
 client.once("clientReady", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
+  for (const [, guild] of client.guilds.cache) {
+    await guild.members.fetch().catch((err) =>
+      console.error(`Failed to fetch members for ${guild.name}:`, err.message)
+    );
+  }
+
   const rest = new REST().setToken(config.token);
   await rest.put(Routes.applicationCommands(client.application.id), {
     body: commands,
