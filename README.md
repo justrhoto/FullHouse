@@ -102,6 +102,7 @@ Pure voice-state logic lives in `src/logic.js` and is covered by `test/logic.tes
 3. **One shy:** `voiceCount === totalMembers - 1` → posts the alert embed and pings the missing member.
 4. **Full:** `voiceCount === totalMembers` → posts the celebration embed and starts a timer.
 5. **Someone leaves:** stops the timer, saves the session to `data.json`, posts a session-end embed.
+6. **Self-healing:** a reconciliation sweep re-checks every server once a minute (and after a gateway reconnect), so an almost-full/full state is still caught even if the triggering event was missed. A 10-minute per-server cooldown keeps almost-full alerts from repeating.
 
 ---
 

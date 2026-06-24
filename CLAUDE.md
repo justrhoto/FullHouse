@@ -35,20 +35,24 @@ Source files in `src/`:
 ### Two kinds of state — keep them distinct
 
 1. **Persistent, per-guild** in `data.json` under `guilds[guildId]`: `alertChannelId`, `term`, and `history[]` (session records). Loaded/saved on every access via `storage.js` — there is no in-memory cache, so `loadData()` is called repeatedly; mutate the returned object then `saveData()`.
-2. **Ephemeral, in-memory** in the `guildState` object (`getState`): `{ alertSent, fullHouseStart }`. This is the transition-detection state machine and is **lost on restart** — an in-progress Full House session that started before a restart will not be recorded.
+2. **Ephemeral, in-memory** in the `guildState` object (`getState`): `{ alertSent, fullHouseStart, lastAlertAt }`. This is the transition-detection state machine and is **lost on restart** — an in-progress Full House session that started before a restart will not be recorded. `lastAlertAt` backs the almost-full alert cooldown (`ALERT_COOLDOWN_MS`, 10 min).
 
-### Voice transition logic (`handleVoiceUpdate`)
+### Voice evaluation (`evaluateGuild`)
 
-Triggered on every `voiceStateUpdate`. `bot.js` gathers the counts (`getVoiceMemberCount` / `getTotalMemberCount`) and current state flags, then calls `evaluateVoiceState(...)` in `logic.js`, which returns `{ alert, celebrate, end, resetAlert }`. `bot.js` applies the side effects:
+`evaluateGuild(guild)` gathers the counts (`getVoiceMemberCount` / `getTotalMemberCount`) and current state flags, then calls `evaluateVoiceState(...)` in `logic.js`, which returns `{ alert, celebrate, end, resetAlert }`. `bot.js` applies the side effects:
 
-- `alert` (one shy, not yet alerted) → send "almost full" alert, set `alertSent`.
+- `alert` (one shy, not yet alerted, cooldown elapsed, not in the same beat a session ends) → send "almost full" alert, set `alertSent`/`lastAlertAt`.
 - `celebrate` (full, no active session) → send celebration, set `fullHouseStart`, clear `alertSent`.
 - `end` (no longer full, session active) → compute duration, push a record to `history`, save, send end embed.
 - `resetAlert` (two or more short) → reset `alertSent` so the alert can fire again.
 
 When changing this behavior, update `evaluateVoiceState` and its tests rather than burying conditionals back in `bot.js`.
 
-Early-returns if there is no configured alert channel or `totalCount < 2`. Member counts rely on `guild.members.cache`, which is why members are fetched on `clientReady` and again before `/status`.
+Early-returns if there is no configured alert channel or `totalCount < 2`. Member counts rely on `guild.members.cache`, which is why members are fetched on `clientReady`, on reconnect, and before `/status`.
+
+### Why it's both event- and poll-driven
+
+`evaluateGuild` is invoked three ways: (1) on every `voiceStateUpdate` event, (2) by a periodic reconciliation sweep (`sweepAllGuilds`, every `RECONCILE_INTERVAL_MS` = 60 s) over all cached guilds, and (3) by `resync()` on `shardResume`/`shardReady`. The sweep exists because the bot is otherwise edge-triggered: a gateway reconnect re-syncs the member/voice cache but does **not** replay `voiceStateUpdate` events, so a near-full state reached during the gap would never be announced. The sweep re-reads the (now-correct) cache and catches it; the alert cooldown + `alertSent` flag keep it from re-posting anything already announced. Gateway lifecycle events (`shardDisconnect`/`shardReconnecting`/`shardResume`) are logged for visibility.
 
 ### Slash commands
 

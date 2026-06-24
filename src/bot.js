@@ -47,8 +47,7 @@ async function getAlertChannel(guild) {
   return guild.channels.cache.get(guildConfig.alertChannelId) || null;
 }
 
-async function handleVoiceUpdate(oldState, newState) {
-  const guild = newState.guild || oldState.guild;
+async function evaluateGuild(guild) {
   if (!guild) return;
 
   const voiceCount = getVoiceMemberCount(guild);
@@ -145,6 +144,44 @@ async function handleVoiceUpdate(oldState, newState) {
   if (resetAlert) {
     state.alertSent = false;
   }
+}
+
+// How often the reconciliation sweep re-checks every guild's voice state.
+const RECONCILE_INTERVAL_MS = 60 * 1000;
+
+let initialized = false;
+let reconcileTimer = null;
+
+async function fetchAllMembers() {
+  for (const [, guild] of client.guilds.cache) {
+    await guild.members
+      .fetch()
+      .catch((err) =>
+        console.error(
+          `Failed to fetch members for ${guild.name}:`,
+          err.message,
+        ),
+      );
+  }
+}
+
+// Re-evaluate every guild from the current cache. Self-healing: catches a
+// near-full / full state we never got an event for — e.g. after a gateway
+// reconnect, which re-syncs the cache but does NOT replay voiceStateUpdate
+// events. The alert cooldown keeps this from re-posting what it already has.
+async function sweepAllGuilds() {
+  for (const [, guild] of client.guilds.cache) {
+    await evaluateGuild(guild).catch((err) =>
+      console.error(`Sweep failed for ${guild.name}:`, err.message),
+    );
+  }
+}
+
+// After a reconnect the cache may be stale, so refresh members then reconcile.
+async function resync(reason) {
+  console.log(`🔄 Re-syncing after ${reason}...`);
+  await fetchAllMembers();
+  await sweepAllGuilds();
 }
 
 // ---- Slash Commands ----
@@ -311,21 +348,14 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
-client.on("voiceStateUpdate", handleVoiceUpdate);
+client.on("voiceStateUpdate", (oldState, newState) =>
+  evaluateGuild(newState.guild || oldState.guild),
+);
 
 client.once("clientReady", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
-  for (const [, guild] of client.guilds.cache) {
-    await guild.members
-      .fetch()
-      .catch((err) =>
-        console.error(
-          `Failed to fetch members for ${guild.name}:`,
-          err.message,
-        ),
-      );
-  }
+  await fetchAllMembers();
 
   const rest = new REST().setToken(config.token);
   await rest.put(Routes.applicationCommands(client.application.id), {
@@ -333,6 +363,30 @@ client.once("clientReady", async () => {
   });
   console.log("✅ Slash commands registered globally");
   console.log(`📡 Watching ${client.guilds.cache.size} server(s)`);
+
+  reconcileTimer = setInterval(() => {
+    sweepAllGuilds().catch((err) =>
+      console.error("Reconciliation sweep error:", err.message),
+    );
+  }, RECONCILE_INTERVAL_MS);
+  initialized = true;
+  console.log(`🔁 Reconciliation sweep every ${RECONCILE_INTERVAL_MS / 1000}s`);
+});
+
+// Gateway lifecycle — log connection health and re-sync after a reconnect,
+// since a fresh reconnect re-syncs the cache without replaying voice events.
+client.on("shardDisconnect", (event, id) =>
+  console.warn(`⚠️  Shard ${id} disconnected (code ${event?.code}).`),
+);
+client.on("shardReconnecting", (id) =>
+  console.log(`… Shard ${id} reconnecting.`),
+);
+client.on("shardResume", (id) => {
+  console.log(`✅ Shard ${id} resumed.`);
+  if (initialized) resync(`shard ${id} resume`);
+});
+client.on("shardReady", (id) => {
+  if (initialized) resync(`shard ${id} ready`);
 });
 
 client.on("error", (err) => {
@@ -341,6 +395,7 @@ client.on("error", (err) => {
 
 async function shutdown(signal) {
   console.log(`\nReceived ${signal}, shutting down...`);
+  if (reconcileTimer) clearInterval(reconcileTimer);
   try {
     await client.destroy();
   } finally {
