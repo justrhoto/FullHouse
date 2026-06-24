@@ -34,8 +34,8 @@ Source files in `src/`:
 
 ### Two kinds of state — keep them distinct
 
-1. **Persistent, per-guild** in `data.json` under `guilds[guildId]`: `alertChannelId`, `term`, and `history[]` (session records). Loaded/saved on every access via `storage.js` — there is no in-memory cache, so `loadData()` is called repeatedly; mutate the returned object then `saveData()`.
-2. **Ephemeral, in-memory** in the `guildState` object (`getState`): `{ alertSent, fullHouseStart, lastAlertAt }`. This is the transition-detection state machine and is **lost on restart** — an in-progress Full House session that started before a restart will not be recorded. `lastAlertAt` backs the almost-full alert cooldown (`ALERT_COOLDOWN_MS`, 10 min).
+1. **Persistent config/history, per-guild** in `data.json` under `guilds[guildId]`: `alertChannelId`, `term`, and `history[]` (session records). Loaded/saved on every access via `storage.js` — there is no in-memory cache, so `loadData()` is called repeatedly; mutate the returned object then `saveData()`.
+2. **Session state**, the transition-detection machine: `{ alertSent, fullHouseStart, lastAlertAt }`. Held in-memory in `guildState` as the working copy, but **also persisted** to `data.json` under `guilds[guildId].session`. `getState` hydrates it from disk on first access (`hydrateSession`), and `persistSession` writes it back via `serializeSession` — but **only on real transitions**, so steady state and idle sweeps perform no writes. `fullHouseStart` is stored as an ISO string so an in-progress Full House survives a restart and its duration is still measured from the original start. `lastAlertAt` backs the almost-full alert cooldown (`ALERT_COOLDOWN_MS`, 10 min) and persists so a restart won't immediately re-ping. Caveat: a session spanning a long outage where everyone left mid-outage will over-count duration up to the moment the bot next observes the channel isn't full — we can't know the true end time.
 
 ### Voice evaluation (`evaluateGuild`)
 

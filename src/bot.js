@@ -17,6 +17,8 @@ const {
   getTotalMemberCount,
   getMissingMembers,
   evaluateVoiceState,
+  hydrateSession,
+  serializeSession,
 } = require("./logic.js");
 
 const client = new Client({
@@ -29,15 +31,22 @@ const client = new Client({
 
 const guildState = {};
 
+// In-memory working copy of each guild's session state, hydrated from data.json
+// on first access so an in-progress Full House survives a restart.
 function getState(guildId) {
   if (!guildState[guildId]) {
-    guildState[guildId] = {
-      alertSent: false,
-      fullHouseStart: null,
-      lastAlertAt: null,
-    };
+    guildState[guildId] = hydrateSession(loadData().guilds?.[guildId]?.session);
   }
   return guildState[guildId];
+}
+
+// Write the session snapshot into the shared data object and flush to disk.
+// Called only on real transitions, so steady state (and every idle sweep)
+// performs no writes.
+function persistSession(data, guildId, state) {
+  if (!data.guilds[guildId]) data.guilds[guildId] = {};
+  data.guilds[guildId].session = serializeSession(state);
+  saveData(data);
 }
 
 async function getAlertChannel(guild) {
@@ -74,6 +83,7 @@ async function evaluateGuild(guild) {
     state.alertSent = true;
     state.lastAlertAt = now;
     state.fullHouseStart = null;
+    persistSession(data, guild.id, state);
 
     const missingList = getMissingMembers(guild)
       .map((m) => `<@${m.id}>`)
@@ -96,6 +106,7 @@ async function evaluateGuild(guild) {
   if (celebrate) {
     state.alertSent = false;
     state.fullHouseStart = new Date();
+    persistSession(data, guild.id, state);
 
     const embed = new EmbedBuilder()
       .setColor(0x00ff88)
@@ -125,7 +136,7 @@ async function evaluateGuild(guild) {
     if (!data.guilds[guild.id]) data.guilds[guild.id] = {};
     if (!data.guilds[guild.id].history) data.guilds[guild.id].history = [];
     data.guilds[guild.id].history.push(record);
-    saveData(data);
+    persistSession(data, guild.id, state);
 
     const embed = new EmbedBuilder()
       .setColor(0xff6b6b)
@@ -141,8 +152,9 @@ async function evaluateGuild(guild) {
     await alertChannel.send({ embeds: [embed] });
   }
 
-  if (resetAlert) {
+  if (resetAlert && state.alertSent) {
     state.alertSent = false;
+    persistSession(data, guild.id, state);
   }
 }
 

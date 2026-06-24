@@ -123,11 +123,19 @@ Sessions are saved in `data.json` (auto-created, gitignored):
           "durationFormatted": "1h 30m 0s",
           "memberCount": 6
         }
-      ]
+      ],
+      "session": {
+        "alertSent": false,
+        "fullHouseStart": "2024-11-10T22:15:00.000Z",
+        "lastAlertAt": 1731276900000
+      }
     }
   }
 }
 ```
+
+The `session` object is the live transition state; persisting it means an
+in-progress Full House keeps its timer across a bot restart or redeploy.
 
 ---
 

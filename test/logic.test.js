@@ -7,6 +7,9 @@ const {
   getTotalMemberCount,
   getMissingMembers,
   evaluateVoiceState,
+  defaultSession,
+  serializeSession,
+  hydrateSession,
 } = require("../src/logic.js");
 
 // --- Mock builders (mimic the bits of discord.js the helpers touch) ---
@@ -185,4 +188,32 @@ test("evaluateVoiceState: does not alert in the same beat a session ends", () =>
   });
   assert.equal(r.end, true);
   assert.equal(r.alert, false);
+});
+
+// --- session persistence ---
+
+test("hydrateSession returns defaults for missing/undefined session", () => {
+  assert.deepEqual(hydrateSession(undefined), defaultSession());
+  assert.deepEqual(hydrateSession(null), defaultSession());
+});
+
+test("session survives a serialize -> hydrate round-trip with an active session", () => {
+  const start = new Date("2026-06-24T20:00:00.000Z");
+  const state = { alertSent: true, fullHouseStart: start, lastAlertAt: 1700 };
+
+  const restored = hydrateSession(serializeSession(state));
+
+  assert.equal(restored.alertSent, true);
+  assert.equal(restored.lastAlertAt, 1700);
+  assert.ok(restored.fullHouseStart instanceof Date);
+  // Same instant, so an in-progress session's duration is measured from the
+  // original start after a restart.
+  assert.equal(restored.fullHouseStart.getTime(), start.getTime());
+});
+
+test("serializeSession stores fullHouseStart as null when no session is active", () => {
+  const serialized = serializeSession(defaultSession());
+  assert.equal(serialized.fullHouseStart, null);
+  assert.equal(serialized.alertSent, false);
+  assert.equal(serialized.lastAlertAt, null);
 });

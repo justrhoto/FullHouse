@@ -81,6 +81,36 @@ function evaluateVoiceState({
   };
 }
 
+// The default (no session yet / not persisted) per-guild ephemeral state.
+function defaultSession() {
+  return { alertSent: false, fullHouseStart: null, lastAlertAt: null };
+}
+
+// Convert the in-memory state to a JSON-safe shape for data.json. fullHouseStart
+// is a Date in memory, stored as an ISO string so an in-progress session survives
+// a restart and its duration is measured from the original start.
+function serializeSession(state) {
+  return {
+    alertSent: Boolean(state.alertSent),
+    fullHouseStart: state.fullHouseStart
+      ? new Date(state.fullHouseStart).toISOString()
+      : null,
+    lastAlertAt: state.lastAlertAt ?? null,
+  };
+}
+
+// Inverse of serializeSession: rebuild the in-memory state from data.json.
+function hydrateSession(saved) {
+  if (!saved) return defaultSession();
+  return {
+    alertSent: Boolean(saved.alertSent),
+    fullHouseStart: saved.fullHouseStart
+      ? new Date(saved.fullHouseStart)
+      : null,
+    lastAlertAt: saved.lastAlertAt ?? null,
+  };
+}
+
 module.exports = {
   ALERT_COOLDOWN_MS,
   formatDuration,
@@ -88,4 +118,7 @@ module.exports = {
   getTotalMemberCount,
   getMissingMembers,
   evaluateVoiceState,
+  defaultSession,
+  serializeSession,
+  hydrateSession,
 };
