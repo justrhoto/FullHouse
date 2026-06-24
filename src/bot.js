@@ -31,7 +31,11 @@ const guildState = {};
 
 function getState(guildId) {
   if (!guildState[guildId]) {
-    guildState[guildId] = { alertSent: false, fullHouseStart: null };
+    guildState[guildId] = {
+      alertSent: false,
+      fullHouseStart: null,
+      lastAlertAt: null,
+    };
   }
   return guildState[guildId];
 }
@@ -57,15 +61,19 @@ async function handleVoiceUpdate(oldState, newState) {
   const data = loadData();
   const term = data.guilds?.[guild.id]?.term || "Full House";
 
+  const now = Date.now();
   const { alert, celebrate, end, resetAlert } = evaluateVoiceState({
     voiceCount,
     totalCount,
     alertSent: state.alertSent,
     fullHouseActive: Boolean(state.fullHouseStart),
+    lastAlertAt: state.lastAlertAt,
+    now,
   });
 
   if (alert) {
     state.alertSent = true;
+    state.lastAlertAt = now;
     state.fullHouseStart = null;
 
     const missingList = getMissingMembers(guild)

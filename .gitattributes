@@ -1,0 +1,3 @@
+# Normalize text files to LF in the repo and on checkout (even on Windows, where
+# this overrides core.autocrlf), so Prettier's LF setting holds everywhere.
+* text=auto eol=lf

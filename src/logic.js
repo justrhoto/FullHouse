@@ -49,6 +49,10 @@ function getMissingMembers(guild) {
   return missing;
 }
 
+// Minimum time between "almost full" alerts for a guild. Stops a member who
+// disconnects/reconnects near the threshold from re-pinging the missing people.
+const ALERT_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes
+
 // Given the current counts and ephemeral state flags, decide which transitions
 // should fire. Pure: returns booleans, mutates nothing.
 function evaluateVoiceState({
@@ -56,21 +60,29 @@ function evaluateVoiceState({
   totalCount,
   alertSent,
   fullHouseActive,
+  lastAlertAt = null,
+  now = Date.now(),
 }) {
   if (totalCount < 2) {
     return { alert: false, celebrate: false, end: false, resetAlert: false };
   }
   const oneShyOfFull = voiceCount === totalCount - 1;
   const fullHouse = voiceCount === totalCount;
+  const end = !fullHouse && fullHouseActive;
+  const cooldownPassed =
+    lastAlertAt === null || now - lastAlertAt >= ALERT_COOLDOWN_MS;
   return {
-    alert: oneShyOfFull && !alertSent,
+    // Suppress the alert while it's still armed, during the cooldown window, or
+    // in the same beat a full session ends (avoids the end + "come join" double-post).
+    alert: oneShyOfFull && !alertSent && !end && cooldownPassed,
     celebrate: fullHouse && !fullHouseActive,
-    end: !fullHouse && fullHouseActive,
+    end,
     resetAlert: voiceCount < totalCount - 1,
   };
 }
 
 module.exports = {
+  ALERT_COOLDOWN_MS,
   formatDuration,
   getVoiceMemberCount,
   getTotalMemberCount,

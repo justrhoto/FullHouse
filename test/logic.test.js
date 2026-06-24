@@ -1,6 +1,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const {
+  ALERT_COOLDOWN_MS,
   formatDuration,
   getVoiceMemberCount,
   getTotalMemberCount,
@@ -144,4 +145,44 @@ test("evaluateVoiceState: resets alert when two or more short", () => {
     fullHouseActive: false,
   });
   assert.equal(r.resetAlert, true);
+});
+
+test("evaluateVoiceState: suppresses alert within the cooldown window", () => {
+  const now = 1_000_000;
+  const r = evaluateVoiceState({
+    voiceCount: 2,
+    totalCount: 3,
+    alertSent: false,
+    fullHouseActive: false,
+    lastAlertAt: now - (ALERT_COOLDOWN_MS - 1),
+    now,
+  });
+  assert.equal(r.alert, false);
+});
+
+test("evaluateVoiceState: allows alert once the cooldown has elapsed", () => {
+  const now = 1_000_000;
+  const r = evaluateVoiceState({
+    voiceCount: 2,
+    totalCount: 3,
+    alertSent: false,
+    fullHouseActive: false,
+    lastAlertAt: now - ALERT_COOLDOWN_MS,
+    now,
+  });
+  assert.equal(r.alert, true);
+});
+
+test("evaluateVoiceState: does not alert in the same beat a session ends", () => {
+  // Full house (3/3) breaks to one-shy (2/3): end fires, almost-full must not.
+  const r = evaluateVoiceState({
+    voiceCount: 2,
+    totalCount: 3,
+    alertSent: false,
+    fullHouseActive: true,
+    lastAlertAt: null, // cooldown long expired, so only the end-guard suppresses it
+    now: 1_000_000,
+  });
+  assert.equal(r.end, true);
+  assert.equal(r.alert, false);
 });
