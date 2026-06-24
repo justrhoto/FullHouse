@@ -11,6 +11,13 @@ const {
 } = require("discord.js");
 const config = require("./config.js");
 const { loadData, saveData } = require("./storage.js");
+const {
+  formatDuration,
+  getVoiceMemberCount,
+  getTotalMemberCount,
+  getMissingMembers,
+  evaluateVoiceState,
+} = require("./logic.js");
 
 const client = new Client({
   intents: [
@@ -29,22 +36,6 @@ function getState(guildId) {
   return guildState[guildId];
 }
 
-function getVoiceMemberCount(guild) {
-  let count = 0;
-  for (const [, channel] of guild.channels.cache) {
-    if (channel.isVoiceBased()) {
-      for (const [, member] of channel.members) {
-        if (!member.user.bot) count++;
-      }
-    }
-  }
-  return count;
-}
-
-function getTotalMemberCount(guild) {
-  return guild.members.cache.filter((m) => !m.user.bot).size;
-}
-
 async function getAlertChannel(guild) {
   const data = loadData();
   const guildConfig = data.guilds?.[guild.id];
@@ -61,24 +52,25 @@ async function handleVoiceUpdate(oldState, newState) {
   const state = getState(guild.id);
   const alertChannel = await getAlertChannel(guild);
 
-  if (!alertChannel || totalCount < 2) return;
+  if (!alertChannel) return;
 
   const data = loadData();
   const term = data.guilds?.[guild.id]?.term || "Full House";
-  const oneShyOfFull = voiceCount === totalCount - 1;
-  const fullHouse = voiceCount === totalCount;
 
-  if (oneShyOfFull && !state.alertSent) {
+  const { alert, celebrate, end, resetAlert } = evaluateVoiceState({
+    voiceCount,
+    totalCount,
+    alertSent: state.alertSent,
+    fullHouseActive: Boolean(state.fullHouseStart),
+  });
+
+  if (alert) {
     state.alertSent = true;
     state.fullHouseStart = null;
 
-    const missingMembers = guild.members.cache.filter((m) => {
-      if (m.user.bot) return false;
-      return !guild.channels.cache.some(
-        (ch) => ch.isVoiceBased() && ch.members.has(m.id),
-      );
-    });
-    const missingList = missingMembers.map((m) => `<@${m.id}>`).join(", ");
+    const missingList = getMissingMembers(guild)
+      .map((m) => `<@${m.id}>`)
+      .join(", ");
 
     const embed = new EmbedBuilder()
       .setColor(0xffa500)
@@ -94,7 +86,7 @@ async function handleVoiceUpdate(oldState, newState) {
     await alertChannel.send({ embeds: [embed] });
   }
 
-  if (fullHouse && !state.fullHouseStart) {
+  if (celebrate) {
     state.alertSent = false;
     state.fullHouseStart = new Date();
 
@@ -112,7 +104,7 @@ async function handleVoiceUpdate(oldState, newState) {
     await alertChannel.send({ embeds: [embed] });
   }
 
-  if (!fullHouse && state.fullHouseStart) {
+  if (end) {
     const duration = Date.now() - state.fullHouseStart.getTime();
     const durationStr = formatDuration(duration);
     state.fullHouseStart = null;
@@ -142,21 +134,9 @@ async function handleVoiceUpdate(oldState, newState) {
     await alertChannel.send({ embeds: [embed] });
   }
 
-  if (voiceCount < totalCount - 1) {
+  if (resetAlert) {
     state.alertSent = false;
   }
-}
-
-function formatDuration(ms) {
-  const seconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-
-  if (days > 0) return `${days}d ${hours % 24}h ${minutes % 60}m`;
-  if (hours > 0) return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
-  if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
-  return `${seconds}s`;
 }
 
 // ---- Slash Commands ----
@@ -329,9 +309,14 @@ client.once("clientReady", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
   for (const [, guild] of client.guilds.cache) {
-    await guild.members.fetch().catch((err) =>
-      console.error(`Failed to fetch members for ${guild.name}:`, err.message)
-    );
+    await guild.members
+      .fetch()
+      .catch((err) =>
+        console.error(
+          `Failed to fetch members for ${guild.name}:`,
+          err.message,
+        ),
+      );
   }
 
   const rest = new REST().setToken(config.token);
@@ -346,4 +331,18 @@ client.on("error", (err) => {
   console.error("Discord client error:", err.message);
 });
 
-client.login(config.token);
+async function shutdown(signal) {
+  console.log(`\nReceived ${signal}, shutting down...`);
+  try {
+    await client.destroy();
+  } finally {
+    process.exit(0);
+  }
+}
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+
+client.login(config.token).catch((err) => {
+  console.error("Failed to log in:", err.message);
+  process.exit(1);
+});

@@ -70,6 +70,20 @@ In Discord, run `/setchannel #your-channel` to tell the bot where to post alerts
 
 ---
 
+## Development
+
+```bash
+npm test            # run the unit tests (node:test)
+npm run lint        # ESLint
+npm run format      # auto-format with Prettier
+npm run check       # lint + format check + tests (what CI runs)
+```
+
+Pure voice-state logic lives in `src/logic.js` and is covered by `test/logic.test.js`;
+`src/bot.js` wires it to the Discord client. CI runs `npm run check` on push and PRs.
+
+---
+
 ## Commands
 
 | Command                | Description                              | Permission    |

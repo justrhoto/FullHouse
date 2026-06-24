@@ -17,7 +17,10 @@ function loadData() {
 }
 
 function saveData(data) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), "utf8");
+  // Write to a temp file then rename, so a crash mid-write can't corrupt data.json.
+  const tmpFile = `${DATA_FILE}.tmp`;
+  fs.writeFileSync(tmpFile, JSON.stringify(data, null, 2), "utf8");
+  fs.renameSync(tmpFile, DATA_FILE);
 }
 
 module.exports = { loadData, saveData };
