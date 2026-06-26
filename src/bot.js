@@ -12,6 +12,7 @@ const {
 const config = require("./config.js");
 const { loadData, saveData } = require("./storage.js");
 const {
+  ALERT_COOLDOWN_MS,
   formatDuration,
   getVoiceMemberCount,
   getTotalMemberCount,
@@ -70,21 +71,36 @@ async function evaluateGuild(guild) {
   const term = data.guilds?.[guild.id]?.term || "Full House";
 
   const now = Date.now();
-  const { alert, celebrate, end, resetAlert } = evaluateVoiceState({
-    voiceCount,
-    totalCount,
-    alertSent: state.alertSent,
-    fullHouseActive: Boolean(state.fullHouseStart),
-    lastAlertAt: state.lastAlertAt,
-    now,
-  });
+  const { alert, celebrate, end, resetAlert, oneShyOfFull, cooldownPassed } =
+    evaluateVoiceState({
+      voiceCount,
+      totalCount,
+      alertSent: state.alertSent,
+      fullHouseActive: Boolean(state.fullHouseStart),
+      lastAlertAt: state.lastAlertAt,
+      now,
+    });
 
+  // Observability: when we're one shy but won't alert, name the reason. This is
+  // the line that turns a silent "6 of 7, no ping" into a self-diagnosing event.
+  if (oneShyOfFull && !alert) {
+    const reasons = [];
+    if (state.alertSent) reasons.push("already alerted (armed)");
+    if (!cooldownPassed) {
+      const waitMs = ALERT_COOLDOWN_MS - (now - state.lastAlertAt);
+      reasons.push(`cooldown ${Math.ceil(waitMs / 1000)}s remaining`);
+    }
+    if (end) reasons.push("session ending this beat");
+    console.log(
+      `🔕 ${guild.name}: ${voiceCount}/${totalCount} one shy, no alert — ${reasons.join(", ") || "unknown"}`,
+    );
+  }
+
+  // For each transition: SEND FIRST, then commit + persist state only on a
+  // successful send. A failed send (perms, deleted channel, rate-limit, blip)
+  // thus leaves state untouched, so the next sweep retries instead of the alert
+  // being silently marked done and suppressed by alertSent + cooldown.
   if (alert) {
-    state.alertSent = true;
-    state.lastAlertAt = now;
-    state.fullHouseStart = null;
-    persistSession(data, guild.id, state);
-
     const missingList = getMissingMembers(guild)
       .map((m) => `<@${m.id}>`)
       .join(", ");
@@ -100,14 +116,24 @@ async function evaluateGuild(guild) {
       .setTimestamp()
       .setFooter({ text: "Full House Bot" });
 
-    await alertChannel.send({ embeds: [embed] });
+    try {
+      await alertChannel.send({ embeds: [embed] });
+      state.alertSent = true;
+      state.lastAlertAt = now;
+      state.fullHouseStart = null;
+      persistSession(data, guild.id, state);
+      console.log(
+        `🔔 ${guild.name}: almost-full alert sent (${voiceCount}/${totalCount}).`,
+      );
+    } catch (err) {
+      console.error(
+        `Failed to send almost-full alert for ${guild.name}:`,
+        err.message,
+      );
+    }
   }
 
   if (celebrate) {
-    state.alertSent = false;
-    state.fullHouseStart = new Date();
-    persistSession(data, guild.id, state);
-
     const embed = new EmbedBuilder()
       .setColor(0x00ff88)
       .setTitle(`🎊 ${term.toUpperCase()}! 🎊`)
@@ -119,24 +145,25 @@ async function evaluateGuild(guild) {
       .setTimestamp()
       .setFooter({ text: "Full House Bot" });
 
-    await alertChannel.send({ embeds: [embed] });
+    try {
+      await alertChannel.send({ embeds: [embed] });
+      state.alertSent = false;
+      state.fullHouseStart = new Date();
+      persistSession(data, guild.id, state);
+      console.log(
+        `🎊 ${guild.name}: ${term} celebration sent (${totalCount}/${totalCount}).`,
+      );
+    } catch (err) {
+      console.error(
+        `Failed to send ${term} celebration for ${guild.name}:`,
+        err.message,
+      );
+    }
   }
 
   if (end) {
     const duration = Date.now() - state.fullHouseStart.getTime();
     const durationStr = formatDuration(duration);
-    state.fullHouseStart = null;
-
-    const record = {
-      timestamp: new Date().toISOString(),
-      durationMs: duration,
-      durationFormatted: durationStr,
-      memberCount: totalCount,
-    };
-    if (!data.guilds[guild.id]) data.guilds[guild.id] = {};
-    if (!data.guilds[guild.id].history) data.guilds[guild.id].history = [];
-    data.guilds[guild.id].history.push(record);
-    persistSession(data, guild.id, state);
 
     const embed = new EmbedBuilder()
       .setColor(0xff6b6b)
@@ -149,12 +176,37 @@ async function evaluateGuild(guild) {
       .setTimestamp()
       .setFooter({ text: "Full House Bot" });
 
-    await alertChannel.send({ embeds: [embed] });
+    try {
+      // Commit the history record only after the embed is delivered. If the send
+      // fails, fullHouseStart stays set and the next sweep re-fires end (with a
+      // slightly longer duration) rather than dropping the session record.
+      await alertChannel.send({ embeds: [embed] });
+      const record = {
+        timestamp: new Date().toISOString(),
+        durationMs: duration,
+        durationFormatted: durationStr,
+        memberCount: totalCount,
+      };
+      if (!data.guilds[guild.id]) data.guilds[guild.id] = {};
+      if (!data.guilds[guild.id].history) data.guilds[guild.id].history = [];
+      data.guilds[guild.id].history.push(record);
+      state.fullHouseStart = null;
+      persistSession(data, guild.id, state);
+      console.log(`😢 ${guild.name}: ${term} ended after ${durationStr}.`);
+    } catch (err) {
+      console.error(
+        `Failed to send ${term} end embed for ${guild.name}:`,
+        err.message,
+      );
+    }
   }
 
   if (resetAlert && state.alertSent) {
     state.alertSent = false;
     persistSession(data, guild.id, state);
+    console.log(
+      `🔄 ${guild.name}: alert re-armed (${voiceCount}/${totalCount}).`,
+    );
   }
 }
 
@@ -361,7 +413,9 @@ client.on("interactionCreate", async (interaction) => {
 });
 
 client.on("voiceStateUpdate", (oldState, newState) =>
-  evaluateGuild(newState.guild || oldState.guild),
+  evaluateGuild(newState.guild || oldState.guild).catch((err) =>
+    console.error("voiceStateUpdate handler error:", err.message),
+  ),
 );
 
 client.once("clientReady", async () => {

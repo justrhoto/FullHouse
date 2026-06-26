@@ -64,7 +64,14 @@ function evaluateVoiceState({
   now = Date.now(),
 }) {
   if (totalCount < 2) {
-    return { alert: false, celebrate: false, end: false, resetAlert: false };
+    return {
+      alert: false,
+      celebrate: false,
+      end: false,
+      resetAlert: false,
+      oneShyOfFull: false,
+      cooldownPassed: false,
+    };
   }
   const oneShyOfFull = voiceCount === totalCount - 1;
   const fullHouse = voiceCount === totalCount;
@@ -78,6 +85,10 @@ function evaluateVoiceState({
     celebrate: fullHouse && !fullHouseActive,
     end,
     resetAlert: voiceCount < totalCount - 1,
+    // Diagnostics for the caller's logging: lets bot.js explain why a near-full
+    // state did or didn't alert without re-deriving the thresholds.
+    oneShyOfFull,
+    cooldownPassed,
   };
 }
 

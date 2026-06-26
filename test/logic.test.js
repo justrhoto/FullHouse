@@ -95,8 +95,39 @@ test("evaluateVoiceState: no-op with fewer than 2 members", () => {
       alertSent: false,
       fullHouseActive: false,
     }),
-    { alert: false, celebrate: false, end: false, resetAlert: false },
+    {
+      alert: false,
+      celebrate: false,
+      end: false,
+      resetAlert: false,
+      oneShyOfFull: false,
+      cooldownPassed: false,
+    },
   );
+});
+
+test("evaluateVoiceState: exposes oneShyOfFull / cooldownPassed diagnostics", () => {
+  const armed = evaluateVoiceState({
+    voiceCount: 2,
+    totalCount: 3,
+    alertSent: true,
+    fullHouseActive: false,
+  });
+  // One shy but suppressed because already alerted — diagnostics explain why.
+  assert.equal(armed.alert, false);
+  assert.equal(armed.oneShyOfFull, true);
+  assert.equal(armed.cooldownPassed, true);
+
+  const cooling = evaluateVoiceState({
+    voiceCount: 2,
+    totalCount: 3,
+    alertSent: false,
+    fullHouseActive: false,
+    lastAlertAt: 1_000_000 - 1,
+    now: 1_000_000,
+  });
+  assert.equal(cooling.oneShyOfFull, true);
+  assert.equal(cooling.cooldownPassed, false);
 });
 
 test("evaluateVoiceState: alerts when one shy and not yet alerted", () => {

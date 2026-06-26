@@ -39,12 +39,16 @@ Source files in `src/`:
 
 ### Voice evaluation (`evaluateGuild`)
 
-`evaluateGuild(guild)` gathers the counts (`getVoiceMemberCount` / `getTotalMemberCount`) and current state flags, then calls `evaluateVoiceState(...)` in `logic.js`, which returns `{ alert, celebrate, end, resetAlert }`. `bot.js` applies the side effects:
+`evaluateGuild(guild)` gathers the counts (`getVoiceMemberCount` / `getTotalMemberCount`) and current state flags, then calls `evaluateVoiceState(...)` in `logic.js`, which returns `{ alert, celebrate, end, resetAlert, oneShyOfFull, cooldownPassed }`. `bot.js` applies the side effects:
 
 - `alert` (one shy, not yet alerted, cooldown elapsed, not in the same beat a session ends) → send "almost full" alert, set `alertSent`/`lastAlertAt`.
 - `celebrate` (full, no active session) → send celebration, set `fullHouseStart`, clear `alertSent`.
 - `end` (no longer full, session active) → compute duration, push a record to `history`, save, send end embed.
 - `resetAlert` (two or more short) → reset `alertSent` so the alert can fire again.
+
+`oneShyOfFull` and `cooldownPassed` are diagnostics, not transitions: they are unused for decisions but let `bot.js` log *why* a near-full state didn't alert (armed `alertSent`, cooldown remaining, or session ending this beat). That "one shy, no alert" log line is the primary tool for diagnosing a silent miss.
+
+**Side effects are send-first, commit-after.** Each transition builds and `await`s `alertChannel.send(...)` *before* mutating/persisting its session state, all inside a `try/catch`. A failed send (missing perms, deleted channel, rate-limit, network blip) therefore leaves state untouched, so the next sweep retries instead of the alert being silently marked sent and then suppressed by `alertSent` + cooldown. (For `end`, the `history` record is also pushed only after a successful send, so the session record isn't dropped on a failed send — at the cost of a slightly longer measured duration on retry.) The `voiceStateUpdate` handler attaches a `.catch` so eval/send rejections are logged, not swallowed.
 
 When changing this behavior, update `evaluateVoiceState` and its tests rather than burying conditionals back in `bot.js`.
 
